@@ -192,7 +192,7 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
     return detections
 
 
-def run(sequence_dir, detection_file, output_file, min_confidence,
+def run(sequence_dir, detection_file, output_dir, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display, top_k_tracks, debug_frames):
     """Run multi-target tracker on a particular sequence.
@@ -203,7 +203,7 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
         Path to the MOTChallenge sequence directory.
     detection_file : str
         Path to the detections file.
-    output_file : str
+    output_dir : str
         Path to the tracking output file. This file will contain the tracking
         results on completion.
     min_confidence : float
@@ -281,7 +281,16 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
     if top_k_tracks is not None:
         results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks)
     # Store results.
-    f = open(output_file, 'w')
+    detection_cfg = os.path.basename(detection_file)
+    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap) + '-' + str(top_k_tracks)
+    save_subdir = detection_cfg + '_' + tracking_cfg
+    save_dir = os.path.join(output_dir, save_subdir)
+    try:
+        os.makedirs(save_dir)
+    except OSError:
+        pass
+    save_filename = os.path.join(save_dir, seq_name + '.txt')
+    f = open(save_filename, 'w')
     for row in results:
         print('%d,%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (
             row[0], row[1], row[2], row[3], row[4], row[5], row[6]), file=f)
@@ -305,9 +314,9 @@ def parse_args():
         "--detection_file", help="Path to custom detections.", default=None,
         required=True)
     parser.add_argument(
-        "--output_file", help="Path to the tracking output file. This file will"
-        " contain the tracking results on completion.",
-        default="/tmp/hypotheses.txt")
+        "--output_dir", help="Path to the tracking output dir. A sub-directory will be created to write a file "
+                             "containing the tracking results on completion.",
+        default="/tmp")
     parser.add_argument(
         "--min_confidence", help="Detection confidence threshold. Disregard "
         "all detections that have a confidence lower than this value.",
@@ -341,6 +350,6 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     run(
-        args.sequence_dir, args.detection_file, args.output_file,
+        args.sequence_dir, args.detection_file, args.output_dir,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
         args.max_cosine_distance, args.nn_budget, args.display, args.top_k_tracks, args.debug_frames)

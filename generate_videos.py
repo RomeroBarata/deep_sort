@@ -38,8 +38,10 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
+    output_dir = os.path.join(args.output_dir, os.path.basename(args.result_dir))
+
     try:
-        os.makedirs(args.output_dir)
+        os.makedirs(output_dir)
     except OSError:
         pass
     for sequence_txt in os.listdir(args.result_dir):
@@ -49,7 +51,7 @@ if __name__ == "__main__":
             continue
         result_file = os.path.join(args.result_dir, sequence_txt)
         update_ms = args.update_ms
-        video_filename = os.path.join(args.output_dir, "%s.avi" % sequence)
+        video_filename = os.path.join(output_dir, "%s.avi" % sequence)
 
         print("Saving %s to %s." % (sequence_txt, video_filename))
         show_results.run(
@@ -63,6 +65,6 @@ if __name__ == "__main__":
         sequence_dir = os.path.join(args.mot_dir, sequence)
         if not os.path.exists(sequence_dir):
             continue
-        filename_in = os.path.join(args.output_dir, "%s.avi" % sequence)
-        filename_out = os.path.join(args.output_dir, "%s.mp4" % sequence)
+        filename_in = os.path.join(output_dir, "%s.avi" % sequence)
+        filename_out = os.path.join(output_dir, "%s.mp4" % sequence)
         convert(filename_in, filename_out)

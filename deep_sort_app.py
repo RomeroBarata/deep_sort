@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from application_util import preprocessing
+from application_util import postprocessing
 from application_util import visualization
 from deep_sort import nn_matching
 from deep_sort.detection import Detection
@@ -93,6 +94,44 @@ def gather_sequence_info(sequence_dir, detection_file):
     return seq_info
 
 
+def gather_mpii_cooking_2_info(sequence_dir, detections, debug_frames=None):
+    image_dir = sequence_dir
+    image_filenames = sorted(os.listdir(image_dir))
+    if debug_frames is not None:
+        image_filenames = image_filenames[:debug_frames]
+    image_filenames = {
+        int(os.path.splitext(f)[0]): os.path.join(image_dir, f)
+        for f in image_filenames}
+
+    if len(image_filenames) > 0:
+        image = cv2.imread(next(iter(image_filenames.values())),
+                           cv2.IMREAD_GRAYSCALE)
+        image_size = image.shape
+    else:
+        image_size = None
+
+    if len(image_filenames) > 0:
+        min_frame_idx = min(image_filenames.keys())
+        max_frame_idx = max(image_filenames.keys())
+    else:
+        min_frame_idx = int(detections[:, 0].min())
+        max_frame_idx = int(detections[:, 0].max())
+
+    feature_dim = detections.shape[1] - 11 if detections is not None else 0
+    seq_info = {
+        "sequence_name": os.path.basename(sequence_dir),
+        "image_filenames": image_filenames,
+        "detections": detections,
+        "groundtruth": None,
+        "image_size": image_size,
+        "min_frame_idx": min_frame_idx,
+        "max_frame_idx": max_frame_idx,
+        "feature_dim": feature_dim,
+        "update_ms": 1000 / 30
+    }
+    return seq_info
+
+
 def create_detections(detection_mat, frame_idx, min_height=0):
     """Create detections for given frame index from the raw detection matrix.
 
@@ -119,16 +158,43 @@ def create_detections(detection_mat, frame_idx, min_height=0):
 
     detection_list = []
     for row in detection_mat[mask]:
-        bbox, confidence, feature = row[2:6], row[6], row[10:]
+        bbox, confidence, track_class, feature = row[2:6], row[6], row[7], row[11:]
         if bbox[3] < min_height:
             continue
-        detection_list.append(Detection(bbox, confidence, feature))
+        detection_list.append(Detection(bbox, confidence, feature, track_class))
     return detection_list
+
+
+def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None):
+    bbs_dir = os.path.join(detection_dir, 'bounding_boxes', seq_name)
+    feats_dir = os.path.join(detection_dir, 'roi_features', seq_name)
+    npy_filenames = sorted(os.listdir(bbs_dir))
+    if debug_frames is not None:
+        npy_filenames = npy_filenames[:debug_frames]
+    detections = []
+    for i, npy_filename in enumerate(npy_filenames, start=1):
+        bbs_filepath = os.path.join(bbs_dir, npy_filename)
+        bbs = np.load(bbs_filepath)
+        bbs_tlbr, bbs_scores, bbs_classes = bbs[:, :4], bbs[:, 4:5], bbs[:, 5:]
+        bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
+        bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
+        frame_indices = np.full_like(bbs_scores, fill_value=i)
+        first_padding_cols = np.full_like(frame_indices, fill_value=-1)
+        second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
+        mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
+                                     bbs_classes, second_padding_cols],
+                                    axis=-1)
+        roi_features_filepath = os.path.join(feats_dir, npy_filename)
+        roi_features = np.load(roi_features_filepath)
+        frame_detections = np.concatenate([mot16_cols, roi_features], axis=-1)
+        detections.append(frame_detections)
+    detections = np.concatenate(detections, axis=0)
+    return detections
 
 
 def run(sequence_dir, detection_file, output_file, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
-        nn_budget, display):
+        nn_budget, display, top_k_tracks, debug_frames):
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -155,9 +221,16 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
         is enforced.
     display : bool
         If True, show visualization of intermediate tracking results.
-
+    top_k_tracks: Optional[int]
+        If not None, filter final output results for longest k tracks.
+    debug_frames: Optional[int]
+        If not None, only tracks the first specified number of frames.
     """
-    seq_info = gather_sequence_info(sequence_dir, detection_file)
+    # seq_info = gather_sequence_info(sequence_dir, detection_file)
+    seq_name = os.path.basename(sequence_dir)
+    # detection_file is actually a dir below
+    collated_detections = gather_mpii_cooking_2_detections(detection_file, seq_name, debug_frames=debug_frames)
+    seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, debug_frames=debug_frames)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
@@ -196,7 +269,7 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
                 continue
             bbox = track.to_tlwh()
             results.append([
-                frame_idx, track.track_id, bbox[0], bbox[1], bbox[2], bbox[3]])
+                frame_idx, track.track_id, track.track_class, bbox[0], bbox[1], bbox[2], bbox[3]])
 
     # Run tracker.
     if display:
@@ -205,11 +278,13 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
         visualizer = visualization.NoVisualization(seq_info)
     visualizer.run(frame_callback)
 
+    if top_k_tracks is not None:
+        results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks)
     # Store results.
     f = open(output_file, 'w')
     for row in results:
-        print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (
-            row[0], row[1], row[2], row[3], row[4], row[5]),file=f)
+        print('%d,%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (
+            row[0], row[1], row[2], row[3], row[4], row[5], row[6]), file=f)
 
 
 def bool_string(input_string):
@@ -217,6 +292,7 @@ def bool_string(input_string):
         raise ValueError("Please Enter a valid Ture/False choice")
     else:
         return (input_string == "True")
+
 
 def parse_args():
     """ Parse command line arguments.
@@ -252,6 +328,13 @@ def parse_args():
     parser.add_argument(
         "--display", help="Show intermediate tracking results",
         default=True, type=bool_string)
+    parser.add_argument(
+        "--top_k_tracks", help="Keep only the longest k tracks. If None, keep all tracks.", type=int, default=None
+    )
+    parser.add_argument("--debug_frames",
+                        help="Number of initial frames from a video to check detection and tracking. If None, track "
+                             "the whole video.",
+                        type=int, default=None)
     return parser.parse_args()
 
 
@@ -260,4 +343,4 @@ if __name__ == "__main__":
     run(
         args.sequence_dir, args.detection_file, args.output_file,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
-        args.max_cosine_distance, args.nn_budget, args.display)
+        args.max_cosine_distance, args.nn_budget, args.display, args.top_k_tracks, args.debug_frames)

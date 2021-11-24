@@ -87,3 +87,9 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# Other
+.idea
+MOT16
+MPIICooking2
+resources

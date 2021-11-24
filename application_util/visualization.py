@@ -109,11 +109,14 @@ class Visualization(object):
     def set_image(self, image):
         self.viewer.image = image
 
-    def draw_groundtruth(self, track_ids, boxes):
+    def draw_groundtruth(self, track_ids, boxes, track_classes=None):
+        if track_classes is None:
+            track_classes = [''] * len(track_ids)
         self.viewer.thickness = 2
-        for track_id, box in zip(track_ids, boxes):
+        for track_id, box, track_class in zip(track_ids, boxes, track_classes):
             self.viewer.color = create_unique_color_uchar(track_id)
-            self.viewer.rectangle(*box.astype(np.int), label=str(track_id))
+            label = str(track_id) + ' - ' + track_class if track_class else str(track_id)
+            self.viewer.rectangle(*box.astype(np.int), label=label)
 
     def draw_detections(self, detections):
         self.viewer.thickness = 2

@@ -12,6 +12,15 @@ from application_util import visualization
 DEFAULT_UPDATE_MS = 20
 
 
+def create_id_to_name_dict(filepath):
+    d = {}
+    with open(filepath, mode='r') as f:
+        for i, line in enumerate(f, start=0):
+            obj_name = line.split(',')[0].lower().strip()
+            d[i] = obj_name
+    return d
+
+
 def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         update_ms=None, video_filename=None):
     """Run tracking result visualization.
@@ -34,7 +43,10 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         If not None, a video of the tracking results is written to this file.
 
     """
-    seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
+    # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
+    track_names_filepath = './resources/objects_vocab.txt'
+    track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
+    seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
     results = np.loadtxt(result_file, delimiter=',')
 
     if show_false_alarms and seq_info["groundtruth"] is None:
@@ -54,8 +66,10 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
 
         mask = results[:, 0].astype(np.int) == frame_idx
         track_ids = results[mask, 1].astype(np.int)
-        boxes = results[mask, 2:6]
-        vis.draw_groundtruth(track_ids, boxes)
+        track_classes = results[mask, 2].astype(np.int)
+        track_classes = [track_cls_to_track_name[track_class] for track_class in track_classes]
+        boxes = results[mask, 3:7]
+        vis.draw_groundtruth(track_ids, boxes, track_classes)
 
         if show_false_alarms:
             groundtruth = seq_info["groundtruth"]

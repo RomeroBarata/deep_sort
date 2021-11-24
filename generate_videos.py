@@ -38,7 +38,10 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    try:
+        os.makedirs(args.output_dir)
+    except OSError:
+        pass
     for sequence_txt in os.listdir(args.result_dir):
         sequence = os.path.splitext(sequence_txt)[0]
         sequence_dir = os.path.join(args.mot_dir, sequence)

@@ -6,6 +6,7 @@ import numpy as np
 
 import deep_sort_app
 from deep_sort.iou_matching import iou
+from application_util import postprocessing
 from application_util import visualization
 
 
@@ -22,7 +23,7 @@ def create_id_to_name_dict(filepath):
 
 
 def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
-        update_ms=None, video_filename=None):
+        update_ms=None, video_filename=None, top_k_tracks=None):
     """Run tracking result visualization.
 
     Parameters
@@ -41,13 +42,16 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         seqinfo.ini is not available.
     video_filename : Optional[Str]
         If not None, a video of the tracking results is written to this file.
-
+    top_k_tracks: Optional[int]
+        If not None, filter final output results for longest k tracks.
     """
     # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
     track_names_filepath = './resources/objects_vocab.txt'
     track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
     seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
     results = np.loadtxt(result_file, delimiter=',')
+    if top_k_tracks is not None:
+        results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks)
 
     if show_false_alarms and seq_info["groundtruth"] is None:
         raise ValueError("No groundtruth available. Cannot show false alarms.")

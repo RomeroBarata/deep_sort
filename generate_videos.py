@@ -19,6 +19,9 @@ def parse_args():
         "--mot_dir", help="Path to MOTChallenge directory (train or test)",
         required=True)
     parser.add_argument(
+        "--top_k_tracks", help="Keep only the longest k tracks. If None, keep all tracks.", type=int, default=None
+    )
+    parser.add_argument(
         "--result_dir", help="Path to the folder with tracking output.",
         required=True)
     parser.add_argument(
@@ -39,6 +42,8 @@ if __name__ == "__main__":
     args = parse_args()
 
     output_dir = os.path.join(args.output_dir, os.path.basename(args.result_dir))
+    if args.top_k_tracks is not None:
+        output_dir += '-' + str(args.top_k_tracks)
 
     try:
         os.makedirs(output_dir)
@@ -55,7 +60,7 @@ if __name__ == "__main__":
 
         print("Saving %s to %s." % (sequence_txt, video_filename))
         show_results.run(
-            sequence_dir, result_file, False, None, update_ms, video_filename)
+            sequence_dir, result_file, False, None, update_ms, video_filename, args.top_k_tracks)
 
     if not args.convert_h264:
         import sys

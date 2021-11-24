@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 
 from application_util import preprocessing
-from application_util import postprocessing
 from application_util import visualization
 from deep_sort import nn_matching
 from deep_sort.detection import Detection
@@ -194,7 +193,7 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
 
 def run(sequence_dir, detection_file, output_dir, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
-        nn_budget, display, top_k_tracks, debug_frames):
+        nn_budget, display, debug_frames):
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -221,8 +220,6 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         is enforced.
     display : bool
         If True, show visualization of intermediate tracking results.
-    top_k_tracks: Optional[int]
-        If not None, filter final output results for longest k tracks.
     debug_frames: Optional[int]
         If not None, only tracks the first specified number of frames.
     """
@@ -278,11 +275,9 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         visualizer = visualization.NoVisualization(seq_info)
     visualizer.run(frame_callback)
 
-    if top_k_tracks is not None:
-        results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks)
     # Store results.
     detection_cfg = os.path.basename(detection_file)
-    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap) + '-' + str(top_k_tracks)
+    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
     save_subdir = detection_cfg + '_' + tracking_cfg
     save_dir = os.path.join(output_dir, save_subdir)
     try:
@@ -337,9 +332,6 @@ def parse_args():
     parser.add_argument(
         "--display", help="Show intermediate tracking results",
         default=True, type=bool_string)
-    parser.add_argument(
-        "--top_k_tracks", help="Keep only the longest k tracks. If None, keep all tracks.", type=int, default=None
-    )
     parser.add_argument("--debug_frames",
                         help="Number of initial frames from a video to check detection and tracking. If None, track "
                              "the whole video.",
@@ -352,4 +344,4 @@ if __name__ == "__main__":
     run(
         args.sequence_dir, args.detection_file, args.output_dir,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
-        args.max_cosine_distance, args.nn_budget, args.display, args.top_k_tracks, args.debug_frames)
+        args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames)

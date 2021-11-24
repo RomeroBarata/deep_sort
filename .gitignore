@@ -92,4 +92,5 @@ ENV/
 .idea
 MOT16
 MPIICooking2
-resources
+resources/detections
+resources/networks

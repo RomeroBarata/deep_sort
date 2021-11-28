@@ -174,7 +174,20 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
     for i, npy_filename in enumerate(npy_filenames, start=1):
         bbs_filepath = os.path.join(bbs_dir, npy_filename)
         bbs = np.load(bbs_filepath)
-        bbs_tlbr, bbs_scores, bbs_classes = bbs[:, :4], bbs[:, 4:5], bbs[:, 5:]
+        try:
+            bbs_tlbr = bbs['bbox']
+        except IndexError:
+            bbs_tlbr = bbs[:, :4]
+        try:
+            bbs_scores = bbs['scores']  # (num_bboxes, num_classes + 1)
+            bbs_classes = np.argmax(bbs_scores[:, 1:], axis=-1) + 1
+            bbs_classes = np.reshape(bbs_classes, (-1, 1))
+            bbs_scores = np.max(bbs_scores[:, 1:], axis=-1, keepdims=True)
+        except KeyError:
+            bbs_scores = np.full_like(bbs_tlbr[:, :1], fill_value=1)
+            bbs_classes = np.full_like(bbs_scores, fill_value=-1)
+        except IndexError:
+            bbs_scores, bbs_classes = bbs[:, 4:5], bbs[:, 5:]
         bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
         bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
         frame_indices = np.full_like(bbs_scores, fill_value=i)
@@ -185,6 +198,10 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
                                     axis=-1)
         roi_features_filepath = os.path.join(feats_dir, npy_filename)
         roi_features = np.load(roi_features_filepath)
+        try:
+            roi_features = roi_features['x']
+        except IndexError:
+            pass
         frame_detections = np.concatenate([mot16_cols, roi_features], axis=-1)
         detections.append(frame_detections)
     detections = np.concatenate(detections, axis=0)

@@ -6,6 +6,7 @@ import os
 
 import cv2
 import numpy as np
+from scipy.special import softmax
 
 from application_util import preprocessing
 from application_util import visualization
@@ -208,6 +209,38 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
     return detections
 
 
+def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
+    cls_logits_dir = os.path.join(detection_dir, 'classes_logits', seq_name)
+    bbs_dir = os.path.join(detection_dir, 'bounding_boxes', seq_name)
+    feats_dir = os.path.join(detection_dir, 'features', seq_name)
+    npy_filenames = sorted(os.listdir(bbs_dir))
+    if debug_frames is not None:
+        npy_filenames = npy_filenames[:debug_frames]
+    detections = []
+    for i, npy_filename in enumerate(npy_filenames, start=1):
+        bbs_filepath = os.path.join(bbs_dir, npy_filename)
+        bbs_tlbr = np.load(bbs_filepath)
+        bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
+        bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
+        cls_logits_filepath = os.path.join(cls_logits_dir, npy_filename)
+        cls_logits = np.load(cls_logits_filepath)
+        cls_probs = softmax(cls_logits, axis=-1)[:, :-1]  # remove background class after softmax
+        bbs_scores = np.max(cls_probs, axis=-1, keepdims=True)
+        bbs_classes = np.reshape(np.argmax(cls_probs, axis=-1), [-1, 1])
+        frame_indices = np.full_like(bbs_scores, fill_value=i)
+        first_padding_cols = np.full_like(frame_indices, fill_value=-1)
+        second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
+        mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
+                                     bbs_classes, second_padding_cols],
+                                    axis=-1)
+        transformer_features_filepath = os.path.join(feats_dir, npy_filename)
+        transformer_features = np.load(transformer_features_filepath)
+        frame_detections = np.concatenate([mot16_cols, transformer_features], axis=-1)
+        detections.append(frame_detections)
+    detections = np.concatenate(detections, axis=0)
+    return detections
+
+
 def run(sequence_dir, detection_file, output_dir, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display, debug_frames):
@@ -243,7 +276,10 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     # seq_info = gather_sequence_info(sequence_dir, detection_file)
     seq_name = os.path.basename(sequence_dir)
     # detection_file is actually a dir below
-    collated_detections = gather_mpii_cooking_2_detections(detection_file, seq_name, debug_frames=debug_frames)
+    if 'detr' in detection_file:
+        collated_detections = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
+    else:
+        collated_detections = gather_mpii_cooking_2_detections(detection_file, seq_name, debug_frames=debug_frames)
     seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, debug_frames=debug_frames)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)

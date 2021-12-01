@@ -319,7 +319,10 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
                 continue
             bbox = track.to_tlwh()
             results.append([
-                frame_idx, track.track_id, track.track_class, track.confidence, bbox[0], bbox[1], bbox[2], bbox[3]])
+                               frame_idx, track.track_id, track.track_class, track.confidence,
+                               bbox[0], bbox[1], bbox[2], bbox[3]
+                           ] +
+                           track.latest_feature.tolist())
 
     # Run tracker.
     if display:
@@ -340,8 +343,13 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     save_filename = os.path.join(save_dir, seq_name + '.txt')
     f = open(save_filename, 'w')
     for row in results:
-        print('%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (
-            row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]), file=f)
+        first_str_data = (row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
+        first_str = '%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1,' % first_str_data
+        second_str_data = tuple(row[8:])
+        second_str = ','.join(['%.6f'] * len(second_str_data))
+        second_str = second_str % second_str_data
+        final_str = first_str + second_str
+        print(final_str, file=f)
 
 
 def bool_string(input_string):

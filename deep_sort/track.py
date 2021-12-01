@@ -73,6 +73,7 @@ class Track:
         self.time_since_update = 0
         self.track_class = track_class if track_class is not None else -1  # Latest class
         self.confidence = confidence if confidence is not None else -1  # Latest confidence
+        self.latest_feature = feature
 
         self.state = TrackState.Tentative
         self.features = []
@@ -142,6 +143,7 @@ class Track:
         self.features.append(detection.feature)
         self.track_class = detection.track_class
         self.confidence = detection.confidence
+        self.latest_feature = detection.feature
 
         self.hits += 1
         self.time_since_update = 0

@@ -10,6 +10,22 @@ from application_util import postprocessing
 from application_util import visualization
 
 
+COCO_CLASSES = [
+    'N/A', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
+    'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'N/A',
+    'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
+    'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'N/A', 'backpack',
+    'umbrella', 'N/A', 'N/A', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
+    'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+    'skateboard', 'surfboard', 'tennis racket', 'bottle', 'N/A', 'wine glass',
+    'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich',
+    'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+    'chair', 'couch', 'potted plant', 'bed', 'N/A', 'dining table', 'N/A',
+    'N/A', 'toilet', 'N/A', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
+    'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'N/A',
+    'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
+    'toothbrush'
+]
 DEFAULT_UPDATE_MS = 20
 
 
@@ -46,8 +62,11 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         If not None, filter final output results for longest k tracks.
     """
     # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
-    track_names_filepath = './resources/objects_vocab.txt'
-    track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
+    if 'detr' in result_file:
+        track_cls_to_track_name = {i: cls_name for i, cls_name in zip(range(len(COCO_CLASSES)), COCO_CLASSES)}
+    else:
+        track_names_filepath = './resources/objects_vocab.txt'
+        track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
     seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
     results = np.loadtxt(result_file, delimiter=',')
     if top_k_tracks is not None:

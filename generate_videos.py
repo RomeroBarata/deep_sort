@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
     output_dir = os.path.join(args.output_dir, os.path.basename(args.result_dir))
     if args.top_k_tracks is not None:
-        output_dir += '-' + str(args.top_k_tracks)
+        output_dir += '-' + str(args.top_k_tracks) + '-' + args.top_k_tracks_criterion
 
     try:
         os.makedirs(output_dir)

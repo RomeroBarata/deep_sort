@@ -39,7 +39,7 @@ def create_id_to_name_dict(filepath):
 
 
 def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
-        update_ms=None, video_filename=None, top_k_tracks=None):
+        update_ms=None, video_filename=None, top_k_tracks=None, top_k_tracks_criterion='length'):
     """Run tracking result visualization.
 
     Parameters
@@ -60,6 +60,9 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         If not None, a video of the tracking results is written to this file.
     top_k_tracks: Optional[int]
         If not None, filter final output results for longest k tracks.
+    top_k_tracks_criterion: str
+        If top_k_tracks is not None, then use this criterion to select top k tracks. Options are: length and
+        accumulated_score.
     """
     # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
     if 'detr' in result_file:
@@ -70,7 +73,7 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
     results = np.loadtxt(result_file, delimiter=',')
     if top_k_tracks is not None:
-        results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks)
+        results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks, top_k_tracks_criterion)
 
     if show_false_alarms and seq_info["groundtruth"] is None:
         raise ValueError("No groundtruth available. Cannot show false alarms.")
@@ -91,7 +94,7 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
         track_ids = results[mask, 1].astype(np.int)
         track_classes = results[mask, 2].astype(np.int)
         track_classes = [track_cls_to_track_name[track_class] for track_class in track_classes]
-        boxes = results[mask, 3:7]
+        boxes = results[mask, 4:8]
         vis.draw_groundtruth(track_ids, boxes, track_classes)
 
         if show_false_alarms:

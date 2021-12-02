@@ -273,8 +273,20 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     debug_frames: Optional[int]
         If not None, only tracks the first specified number of frames.
     """
+    detection_cfg = os.path.basename(detection_file)
+    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
+    save_subdir = detection_cfg + '_' + tracking_cfg
+    save_dir = os.path.join(output_dir, save_subdir)
+    try:
+        os.makedirs(save_dir)
+    except OSError:
+        pass
     # seq_info = gather_sequence_info(sequence_dir, detection_file)
     seq_name = os.path.basename(sequence_dir)
+    save_filename = os.path.join(save_dir, seq_name + '.txt')
+    if os.path.isfile(save_filename):
+        print('Tracking for video %s already done. Skipping it.' % seq_name)
+        return
     # detection_file is actually a dir below
     if 'detr' in detection_file:
         collated_detections = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
@@ -332,15 +344,6 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     visualizer.run(frame_callback)
 
     # Store results.
-    detection_cfg = os.path.basename(detection_file)
-    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
-    save_subdir = detection_cfg + '_' + tracking_cfg
-    save_dir = os.path.join(output_dir, save_subdir)
-    try:
-        os.makedirs(save_dir)
-    except OSError:
-        pass
-    save_filename = os.path.join(save_dir, seq_name + '.txt')
     f = open(save_filename, 'w')
     for row in results:
         first_str_data = (row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])

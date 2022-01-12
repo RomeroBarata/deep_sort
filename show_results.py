@@ -70,6 +70,7 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     else:
         track_names_filepath = './resources/objects_vocab.txt'
         track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
+    # TODO: Fix this gather call.
     seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
     results = np.loadtxt(result_file, delimiter=',')
     if top_k_tracks is not None:

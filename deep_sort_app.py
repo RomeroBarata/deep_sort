@@ -94,7 +94,7 @@ def gather_sequence_info(sequence_dir, detection_file):
     return seq_info
 
 
-def gather_mpii_cooking_2_info(sequence_dir, detections, debug_frames=None):
+def gather_mpii_cooking_2_info(sequence_dir, detections, feature_dim, debug_frames=None):
     image_dir = sequence_dir
     image_filenames = sorted(os.listdir(image_dir))
     if debug_frames is not None:
@@ -117,7 +117,6 @@ def gather_mpii_cooking_2_info(sequence_dir, detections, debug_frames=None):
         min_frame_idx = int(detections[:, 0].min())
         max_frame_idx = int(detections[:, 0].max())
 
-    feature_dim = detections.shape[1] - 11 if detections is not None else 0
     seq_info = {
         "sequence_name": os.path.basename(sequence_dir),
         "image_filenames": image_filenames,
@@ -158,10 +157,15 @@ def create_detections(detection_mat, frame_idx, min_height=0):
 
     detection_list = []
     for row in detection_mat[mask]:
-        bbox, confidence, track_class, feature = row[2:6], row[6], row[7], row[11:]
+        bbox, confidence, track_class = row[2:6], row[6], row[7]
+        track_class_logits = row[11:103]
+        track_hoi_logits = row[103:220]
+        track_pw_features = row[220:1244]
+        feature = row[1244:]
         if bbox[3] < min_height:
             continue
-        detection_list.append(Detection(bbox, confidence, feature, track_class))
+        detection_list.append(Detection(bbox, confidence, feature, track_class, track_class_logits=track_class_logits,
+                                        track_hoi_logits=track_hoi_logits, track_pw_features=track_pw_features))
     return detection_list
 
 
@@ -209,39 +213,66 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
     return detections
 
 
-def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
+def gather_detr_detections(detection_dir, hoi_dir, seq_name, debug_frames=None):
     cls_logits_dir = os.path.join(detection_dir, 'classes_logits', seq_name)
     bbs_dir = os.path.join(detection_dir, 'bounding_boxes', seq_name)
     feats_dir = os.path.join(detection_dir, 'features', seq_name)
+    hoi_cls_logits_dir = os.path.join(hoi_dir, 'classes_logits', seq_name)
+    pw_tokens_dir = os.path.join(hoi_dir, 'pairwise_tokens', seq_name)
+    perm_dir = os.path.join(hoi_dir, 'permutation', seq_name)
     npy_filenames = sorted(os.listdir(bbs_dir))
     if debug_frames is not None:
         npy_filenames = npy_filenames[:debug_frames]
     detections = []
     for i, npy_filename in enumerate(npy_filenames, start=1):
+        # HOI
+        perm = np.load(os.path.join(perm_dir, npy_filename))
+        hoi_logits = np.load(os.path.join(hoi_cls_logits_dir, npy_filename))
+        pw_tokens = np.load(os.path.join(pw_tokens_dir, npy_filename))
+        if len(perm) == 0:
+            perm = np.arange(100)
+            hoi_logits = np.full([100, 117], fill_value=np.nan, dtype=np.float32)
+            pw_tokens = np.full([100, 1024], fill_value=np.nan, dtype=np.float32)
+        else:
+            hoi_logits = np.concatenate([np.full([1, 117], fill_value=np.nan, dtype=np.float32), hoi_logits], axis=0)
+            pw_tokens = np.concatenate([np.full([1, 1024], fill_value=np.nan, dtype=np.float32), pw_tokens], axis=0)
+        # Bounding Boxes
         bbs_filepath = os.path.join(bbs_dir, npy_filename)
-        bbs_tlbr = np.load(bbs_filepath)
+        bbs_tlbr = np.load(bbs_filepath)[perm]  # (#objects, 4) in image coordinates
         bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
         bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
+        # Bounding Boxes Classes + Scores
         cls_logits_filepath = os.path.join(cls_logits_dir, npy_filename)
-        cls_logits = np.load(cls_logits_filepath)
+        cls_logits = np.load(cls_logits_filepath)[perm]  # (#objects, #classes)
         cls_probs = softmax(cls_logits, axis=-1)[:, :-1]  # remove background class after softmax
         bbs_scores = np.max(cls_probs, axis=-1, keepdims=True)
         bbs_classes = np.reshape(np.argmax(cls_probs, axis=-1), [-1, 1])
+        # Frame + Paddings
         frame_indices = np.full_like(bbs_scores, fill_value=i)
         first_padding_cols = np.full_like(frame_indices, fill_value=-1)
         second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
-        mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
-                                     bbs_classes, second_padding_cols],
+        # Aggregate information
+        mot16_cols = np.concatenate([frame_indices,  # 1  0:1
+                                     first_padding_cols,  # 1  1:2
+                                     bbs_tlwh,  # 4  2:6
+                                     bbs_scores,  # 1  6:7
+                                     bbs_classes,  # 1  7:8
+                                     second_padding_cols,  # 3  8:11
+                                     cls_logits,  # 92  11:103
+                                     hoi_logits,  # 117  103:220
+                                     pw_tokens,  # 1024  220:1244
+                                     ],
                                     axis=-1)
+        # Bounding Boxes Visual Features
         transformer_features_filepath = os.path.join(feats_dir, npy_filename)
-        transformer_features = np.load(transformer_features_filepath)
+        transformer_features = np.load(transformer_features_filepath)[perm]
         frame_detections = np.concatenate([mot16_cols, transformer_features], axis=-1)
         detections.append(frame_detections)
     detections = np.concatenate(detections, axis=0)
-    return detections
+    return detections, 256
 
 
-def run(sequence_dir, detection_file, output_dir, min_confidence,
+def run(sequence_dir, detection_dir, hoi_dir, output_dir, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display, debug_frames):
     """Run multi-target tracker on a particular sequence.
@@ -250,8 +281,10 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     ----------
     sequence_dir : str
         Path to the MOTChallenge sequence directory.
-    detection_file : str
-        Path to the detections file.
+    detection_dir : str
+        Path to detections directory.
+    hoi_dir : str
+        Path to HOI detections directory.
     output_dir : str
         Path to the tracking output file. This file will contain the tracking
         results on completion.
@@ -273,26 +306,31 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     debug_frames: Optional[int]
         If not None, only tracks the first specified number of frames.
     """
-    detection_cfg = os.path.basename(detection_file)
+    # Setup directory to save tracking results
+    detection_cfg = os.path.basename(detection_dir)
     tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
     save_subdir = detection_cfg + '_' + tracking_cfg
+    if hoi_dir is not None:
+        save_subdir += '_hoi'
     save_dir = os.path.join(output_dir, save_subdir)
     try:
         os.makedirs(save_dir)
     except OSError:
         pass
+    # Get video name and check whether the file has already been tracked
     # seq_info = gather_sequence_info(sequence_dir, detection_file)
     seq_name = os.path.basename(sequence_dir)
     save_filename = os.path.join(save_dir, seq_name + '.txt')
     if os.path.isfile(save_filename):
         print('Tracking for video %s already done. Skipping it.' % seq_name)
         return
-    # detection_file is actually a dir below
-    if 'detr' in detection_file:
-        collated_detections = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
+    if 'detr' in detection_dir:
+        collated_detections, feature_dim = gather_detr_detections(detection_dir, hoi_dir, seq_name,
+                                                                  debug_frames=debug_frames)
     else:
-        collated_detections = gather_mpii_cooking_2_detections(detection_file, seq_name, debug_frames=debug_frames)
-    seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, debug_frames=debug_frames)
+        collated_detections = gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=debug_frames)
+    seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections,
+                                          feature_dim=feature_dim, debug_frames=debug_frames)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
@@ -334,7 +372,11 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
                                frame_idx, track.track_id, track.track_class, track.confidence,
                                bbox[0], bbox[1], bbox[2], bbox[3]
                            ] +
-                           track.latest_feature.tolist())
+                           track.track_class_logits.tolist() +
+                           track.track_hoi_logits.tolist() +
+                           track.track_pw_features.tolist() +
+                           track.latest_feature.tolist()
+                           )
 
     # Run tracker.
     if display:
@@ -367,11 +409,14 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Deep SORT")
     parser.add_argument(
-        "--sequence_dir", help="Path to MOTChallenge sequence directory",
+        "--sequence_dir", help="Path to video frames. E.g. MPIICooking2/frames/s08-d02-cam-002",
         default=None, required=True)
     parser.add_argument(
-        "--detection_file", help="Path to custom detections.", default=None,
+        "--detection_dir", help="Path to object detections. E.g. MPIICooking2/object-detection/detr", default=None,
         required=True)
+    parser.add_argument(
+        "--hoi_dir", help="Path to directory containing HOI detections. E.g. MPIICooking2/human-object-interaction"
+    )
     parser.add_argument(
         "--output_dir", help="Path to the tracking output dir. A sub-directory will be created to write a file "
                              "containing the tracking results on completion.",
@@ -406,6 +451,6 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     run(
-        args.sequence_dir, args.detection_file, args.output_dir,
+        args.sequence_dir, args.detection_dir, args.hoi_dir, args.output_dir,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
         args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames)

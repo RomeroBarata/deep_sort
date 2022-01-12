@@ -42,6 +42,7 @@ def parse_args():
     return parser.parse_args()
 
 
+# TODO: Check whether this script still works fine with new output format.
 if __name__ == "__main__":
     args = parse_args()
 

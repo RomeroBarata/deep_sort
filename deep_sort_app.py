@@ -251,7 +251,7 @@ def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
 
 def run(sequence_dir, detection_file, output_dir, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
-        nn_budget, display, debug_frames):
+        nn_budget, display, debug_frames, save_tracklets_features):
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -280,6 +280,8 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         If True, show visualization of intermediate tracking results.
     debug_frames: Optional[int]
         If not None, only tracks the first specified number of frames.
+    save_tracklets_features: bool
+        Whether to save extra information, such as visual features, other than the bounding box location and id.
     """
     detection_cfg = os.path.basename(detection_file)
     tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
@@ -355,11 +357,13 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     f = open(save_filename, 'w')
     for row in results:
         first_str_data = (row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
-        first_str = '%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1,' % first_str_data
-        second_str_data = tuple(row[8:])
-        second_str = ','.join(['%.6f'] * len(second_str_data))
-        second_str = second_str % second_str_data
-        final_str = first_str + second_str
+        first_str = '%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % first_str_data
+        final_str = first_str
+        if save_tracklets_features:
+            second_str_data = tuple(row[8:])
+            second_str = ','.join(['%.6f'] * len(second_str_data))
+            second_str = second_str % second_str_data
+            final_str = first_str + "," + second_str
         print(final_str, file=f)
 
 
@@ -404,10 +408,15 @@ def parse_args():
     parser.add_argument(
         "--display", help="Show intermediate tracking results",
         default=True, type=bool_string)
-    parser.add_argument("--debug_frames",
-                        help="Number of initial frames from a video to check detection and tracking. If None, track "
-                             "the whole video.",
-                        type=int, default=None)
+    parser.add_argument(
+        "--debug_frames",
+        help="Number of initial frames from a video to check detection and tracking. If None, track "
+             "the whole video.",
+        type=int, default=None)
+    parser.add_argument(
+        "--save_tracklets_features",
+        help="Whether to save extra information other the bounding box location and id.",
+        default=True, type=bool_string)
     return parser.parse_args()
 
 
@@ -416,4 +425,4 @@ if __name__ == "__main__":
     run(
         args.sequence_dir, args.detection_file, args.output_dir,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
-        args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames)
+        args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames, args.save_tracklets_features)

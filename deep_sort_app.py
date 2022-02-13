@@ -166,14 +166,20 @@ def create_detections(detection_mat, frame_idx, min_height=0):
 
 
 def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None):
+    cls_logits_dir = os.path.join(detection_dir, 'classes_logits', seq_name)
+    pred_classes_dir = os.path.join(detection_dir, 'pred_classes', seq_name)
+    scores_dir = os.path.join(detection_dir, 'scores', seq_name)
     bbs_dir = os.path.join(detection_dir, 'bounding_boxes', seq_name)
-    feats_dir = os.path.join(detection_dir, 'roi_features', seq_name)
+    feats_dir = os.path.join(detection_dir, 'features', seq_name)
     npy_filenames = sorted(os.listdir(bbs_dir))
     if debug_frames is not None:
         npy_filenames = npy_filenames[:debug_frames]
     detections = []
     for i, npy_filename in enumerate(npy_filenames, start=1):
         bbs_filepath = os.path.join(bbs_dir, npy_filename)
+        cls_logits_filepath = os.path.join(cls_logits_dir, npy_filename)
+        pred_classes_filepath = os.path.join(pred_classes_dir, npy_filename)
+        scores_filepath = os.path.join(scores_dir, npy_filename)
         bbs = np.load(bbs_filepath)
         try:
             bbs_tlbr = bbs['bbox']
@@ -188,12 +194,14 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
             bbs_scores = np.full_like(bbs_tlbr[:, :1], fill_value=1)
             bbs_classes = np.full_like(bbs_scores, fill_value=-1)
         except IndexError:
-            bbs_scores, bbs_classes = bbs[:, 4:5], bbs[:, 5:]
+            bbs_scores = np.expand_dims(np.load(scores_filepath), axis=-1)
+            bbs_classes = np.expand_dims(np.load(pred_classes_filepath), axis=-1)
         bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
         bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
         frame_indices = np.full_like(bbs_scores, fill_value=i)
         first_padding_cols = np.full_like(frame_indices, fill_value=-1)
         second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
+        # TODO: Should also update this to save logits
         mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
                                      bbs_classes, second_padding_cols],
                                     axis=-1)

@@ -294,12 +294,13 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
     Parameters
     ----------
     sequence_dir : str
-        Path to the MOTChallenge sequence directory.
+        Path to directory containing video frames.
     detection_file : str
-        Path to the detections file.
+        Path to directory containing object detection of all videos in subdirectories.
     output_dir : str
-        Path to the tracking output file. This file will contain the tracking
-        results on completion.
+        Path to the root directory to save output tracking. A subdirectory is created depending on object detection
+        configuration and the current tracking configuration, and a .txt file with the video tracking is saved inside
+        it.
     min_confidence : float
         Detection confidence threshold. Disregard all detections that have
         a confidence lower than this value.
@@ -421,11 +422,11 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Deep SORT")
     parser.add_argument(
-        "--sequence_dir", help="Path to MOTChallenge sequence directory",
+        "--sequence_dir", help="Path to directory containing video frames.",
         default=None, required=True)
     parser.add_argument(
-        "--detection_file", help="Path to custom detections.", default=None,
-        required=True)
+        "--detection_file", help="Path to directory containing object detection of all videos in subdirectories.",
+        default=None, required=True)
     parser.add_argument(
         "--output_dir", help="Path to the tracking output dir. A sub-directory will be created to write a file "
                              "containing the tracking results on completion.",

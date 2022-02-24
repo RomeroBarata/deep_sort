@@ -321,7 +321,7 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         Whether to save extra information, such as visual features, other than the bounding box location and id.
     """
     detection_cfg = os.path.basename(detection_file)
-    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap)
+    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap) + '-' + str(int(save_tracklets_features))
     save_subdir = detection_cfg + '_' + tracking_cfg
     save_dir = os.path.join(output_dir, save_subdir)
     try:

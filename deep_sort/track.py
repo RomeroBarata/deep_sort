@@ -64,7 +64,7 @@ class Track:
     """
 
     def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None, track_class=None, confidence=None):
+                 feature=None, track_class=None, confidence=None, track_class_logits=None):
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -74,6 +74,7 @@ class Track:
         self.track_class = track_class if track_class is not None else -1  # Latest class
         self.confidence = confidence if confidence is not None else -1  # Latest confidence
         self.latest_feature = feature
+        self.track_class_logits = track_class_logits if track_class_logits is not None else -1
 
         self.state = TrackState.Tentative
         self.features = []
@@ -144,6 +145,7 @@ class Track:
         self.track_class = detection.track_class
         self.confidence = detection.confidence
         self.latest_feature = detection.feature
+        self.track_class_logits = detection.track_class_logits
 
         self.hits += 1
         self.time_since_update = 0

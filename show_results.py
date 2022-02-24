@@ -67,10 +67,12 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
     if 'detr' in result_file:
         track_cls_to_track_name = {i: cls_name for i, cls_name in zip(range(len(COCO_CLASSES)), COCO_CLASSES)}
+        feature_dim = 256
     else:
         track_names_filepath = './resources/objects_vocab.txt'
         track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
-    seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file)
+        feature_dim = 2048
+    seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file, feature_dim=feature_dim)
     results = np.loadtxt(result_file, delimiter=',')
     if top_k_tracks is not None:
         results = postprocessing.filter_top_k_longest_tracks(results, top_k_tracks, top_k_tracks_criterion)

@@ -94,7 +94,7 @@ def gather_sequence_info(sequence_dir, detection_file):
     return seq_info
 
 
-def gather_mpii_cooking_2_info(sequence_dir, detections, debug_frames=None):
+def gather_mpii_cooking_2_info(sequence_dir, detections, feature_dim, debug_frames=None):
     image_dir = sequence_dir
     image_filenames = sorted(os.listdir(image_dir))
     if debug_frames is not None:
@@ -117,7 +117,6 @@ def gather_mpii_cooking_2_info(sequence_dir, detections, debug_frames=None):
         min_frame_idx = int(detections[:, 0].min())
         max_frame_idx = int(detections[:, 0].max())
 
-    feature_dim = detections.shape[1] - 11 if detections is not None else 0
     seq_info = {
         "sequence_name": os.path.basename(sequence_dir),
         "image_filenames": image_filenames,
@@ -157,11 +156,13 @@ def create_detections(detection_mat, frame_idx, min_height=0):
     mask = frame_indices == frame_idx
 
     detection_list = []
-    for row in detection_mat[mask]:
-        bbox, confidence, track_class, feature = row[2:6], row[6], row[7], row[11:]
+    for row in detection_mat[mask]:  # TODO: Make this more flexible. This will only work for Faster R-CNN detections.
+        bbox, confidence, track_class = row[2:6], row[6], row[7]
+        track_class_logits = row[11:1612]
+        feature = row[1612:]
         if bbox[3] < min_height:
             continue
-        detection_list.append(Detection(bbox, confidence, feature, track_class))
+        detection_list.append(Detection(bbox, confidence, feature, track_class, track_class_logits=track_class_logits))
     return detection_list
 
 
@@ -214,7 +215,7 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
         frame_detections = np.concatenate([mot16_cols, roi_features], axis=-1)
         detections.append(frame_detections)
     detections = np.concatenate(detections, axis=0)
-    return detections
+    return detections, 2048
 
 
 def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
@@ -246,7 +247,43 @@ def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
         frame_detections = np.concatenate([mot16_cols, transformer_features], axis=-1)
         detections.append(frame_detections)
     detections = np.concatenate(detections, axis=0)
-    return detections
+    return detections, 256
+
+
+def gather_bua152_detections(detection_file, seq_name, debug_frames=None):
+    detections_dir = os.path.join(detection_file, seq_name)
+    npz_filenames = sorted(os.listdir(detections_dir))
+    if debug_frames is not None:
+        npz_filenames = npz_filenames[:debug_frames]
+    detections = []
+    for i, npz_filename in enumerate(npz_filenames, start=1):
+        frame_data = np.load(os.path.join(detections_dir, npz_filename))
+        bbs_tlbr = frame_data['bounding_boxes']
+        bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
+        bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
+        cls_logits = frame_data['classes_logits']
+        bbs_classes = np.expand_dims(frame_data['pred_classes'], axis=-1)
+        bbs_scores = np.expand_dims(frame_data['scores'], axis=-1)
+        # Frame + Paddings
+        frame_indices = np.full_like(bbs_scores, fill_value=i)
+        first_padding_cols = np.full_like(frame_indices, fill_value=-1)
+        second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
+        # Aggregate information
+        mot16_cols = np.concatenate([frame_indices,  # 1  0:1
+                                     first_padding_cols,  # 1  1:2
+                                     bbs_tlwh,  # 4  2:6
+                                     bbs_scores,  # 1  6:7
+                                     bbs_classes,  # 1  7:8
+                                     second_padding_cols,  # 3  8:11
+                                     cls_logits,  # 1601  11:1612
+                                     ],
+                                    axis=-1)
+        # RoI Pooled features
+        roi_feats = frame_data['features']
+        frame_detections = np.concatenate([mot16_cols, roi_feats], axis=-1)
+        detections.append(frame_detections)
+    detections = np.concatenate(detections, axis=0)
+    return detections, 2048
 
 
 def run(sequence_dir, detection_file, output_dir, min_confidence,
@@ -299,10 +336,13 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         return
     # detection_file is actually a dir below
     if 'detr' in detection_file:
-        collated_detections = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
+        collated_detections, feature_dim = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
+    elif 'bua' in detection_file:
+        collated_detections, feature_dim = gather_bua152_detections(detection_file, seq_name, debug_frames=debug_frames)
     else:
-        collated_detections = gather_mpii_cooking_2_detections(detection_file, seq_name, debug_frames=debug_frames)
-    seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, debug_frames=debug_frames)
+        collated_detections, feature_dim = gather_mpii_cooking_2_detections(detection_file, seq_name,
+                                                                            debug_frames=debug_frames)
+    seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, feature_dim, debug_frames=debug_frames)
     metric = nn_matching.NearestNeighborDistanceMetric(
         "cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
@@ -344,16 +384,18 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
                                frame_idx, track.track_id, track.track_class, track.confidence,
                                bbox[0], bbox[1], bbox[2], bbox[3]
                            ] +
-                           track.latest_feature.tolist())
+                           track.track_class_logits.tolist() +
+                           track.latest_feature.tolist()
+                           )
 
-    # Run tracker.
+    # Run tracker
     if display:
         visualizer = visualization.Visualization(seq_info, update_ms=5)
     else:
         visualizer = visualization.NoVisualization(seq_info)
     visualizer.run(frame_callback)
 
-    # Store results.
+    # Store results
     f = open(save_filename, 'w')
     for row in results:
         first_str_data = (row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
@@ -368,10 +410,10 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
 
 
 def bool_string(input_string):
-    if input_string not in {"True","False"}:
+    if input_string not in {"True", "False"}:
         raise ValueError("Please Enter a valid Ture/False choice")
     else:
-        return (input_string == "True")
+        return input_string == "True"
 
 
 def parse_args():
@@ -415,7 +457,7 @@ def parse_args():
         type=int, default=None)
     parser.add_argument(
         "--save_tracklets_features",
-        help="Whether to save extra information other the bounding box location and id.",
+        help="Whether to save extra information other than bounding box location and id.",
         default=True, type=bool_string)
     return parser.parse_args()
 

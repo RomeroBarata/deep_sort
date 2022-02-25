@@ -131,7 +131,7 @@ def gather_mpii_cooking_2_info(sequence_dir, detections, feature_dim, debug_fram
     return seq_info
 
 
-def create_detections(detection_mat, frame_idx, min_height=0):
+def create_detections(detection_mat, frame_idx, feature_dim, min_height=0):
     """Create detections for given frame index from the raw detection matrix.
 
     Parameters
@@ -156,10 +156,16 @@ def create_detections(detection_mat, frame_idx, min_height=0):
     mask = frame_indices == frame_idx
 
     detection_list = []
-    for row in detection_mat[mask]:  # TODO: Make this more flexible. This will only work for Faster R-CNN detections.
+    for row in detection_mat[mask]:
         bbox, confidence, track_class = row[2:6], row[6], row[7]
-        track_class_logits = row[11:1612]
-        feature = row[1612:]
+        if feature_dim == 256:
+            track_class_logits = row[11:103]
+            feature = row[103:]
+        elif feature_dim == 2048:
+            track_class_logits = row[11:1612]
+            feature = row[1612:]
+        else:
+            raise ValueError('Unknown feature dim to handle')
         if bbox[3] < min_height:
             continue
         detection_list.append(Detection(bbox, confidence, feature, track_class, track_class_logits=track_class_logits))
@@ -239,8 +245,14 @@ def gather_detr_detections(detection_dir, seq_name, debug_frames=None):
         frame_indices = np.full_like(bbs_scores, fill_value=i)
         first_padding_cols = np.full_like(frame_indices, fill_value=-1)
         second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
-        mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
-                                     bbs_classes, second_padding_cols],
+        mot16_cols = np.concatenate([frame_indices,  # 1  0:1
+                                     first_padding_cols,  # 1  1:2
+                                     bbs_tlwh,  # 4  2:6
+                                     bbs_scores,  # 1  6:7
+                                     bbs_classes,  # 1  7:8
+                                     second_padding_cols,  # 3  8:11
+                                     cls_logits,  # 92  11:103
+                                     ],
                                     axis=-1)
         transformer_features_filepath = os.path.join(feats_dir, npy_filename)
         transformer_features = np.load(transformer_features_filepath)
@@ -354,7 +366,7 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
 
         # Load image and generate detections.
         detections = create_detections(
-            seq_info["detections"], frame_idx, min_detection_height)
+            seq_info["detections"], frame_idx, feature_dim, min_detection_height)
         detections = [d for d in detections if d.confidence >= min_confidence]
 
         # Run non-maxima suppression.

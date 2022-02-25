@@ -61,6 +61,9 @@ if __name__ == "__main__":
         result_file = os.path.join(args.result_dir, sequence_txt)
         update_ms = args.update_ms
         video_filename = os.path.join(output_dir, "%s.avi" % sequence)
+        alt_video_filename = os.path.join(output_dir, "%s.mp4" % sequence)
+        if os.path.exists(video_filename) or os.path.exists(alt_video_filename):
+            continue
 
         print("Saving %s to %s." % (sequence_txt, video_filename))
         show_results.run(
@@ -77,4 +80,7 @@ if __name__ == "__main__":
             continue
         filename_in = os.path.join(output_dir, "%s.avi" % sequence)
         filename_out = os.path.join(output_dir, "%s.mp4" % sequence)
+        if os.path.exists(filename_out):
+            continue
         convert(filename_in, filename_out)
+        os.remove(filename_in)

@@ -89,7 +89,7 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
 
         if seq_info["detections"] is not None:
             detections = deep_sort_app.create_detections(
-                seq_info["detections"], frame_idx)
+                seq_info["detections"], frame_idx, feature_dim)
             vis.draw_detections(detections)
 
         mask = results[:, 0].astype(np.int) == frame_idx

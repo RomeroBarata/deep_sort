@@ -202,17 +202,23 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
         except KeyError:
             bbs_scores = np.full_like(bbs_tlbr[:, :1], fill_value=1)
             bbs_classes = np.full_like(bbs_scores, fill_value=-1)
-        except IndexError:
+        except IndexError:  # TODO: This is always the correct path, right?
             bbs_scores = np.expand_dims(np.load(scores_filepath), axis=-1)
             bbs_classes = np.expand_dims(np.load(pred_classes_filepath), axis=-1)
+            cls_logits = np.load(cls_logits_filepath)
         bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
         bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
         frame_indices = np.full_like(bbs_scores, fill_value=i)
         first_padding_cols = np.full_like(frame_indices, fill_value=-1)
         second_padding_cols = np.full_like(bbs_tlwh[:, :3], fill_value=-1)
-        # TODO: Should also update this to save logits
-        mot16_cols = np.concatenate([frame_indices, first_padding_cols, bbs_tlwh, bbs_scores,
-                                     bbs_classes, second_padding_cols],
+        mot16_cols = np.concatenate([frame_indices,  # 1  0:1
+                                     first_padding_cols,  # 1  1:2
+                                     bbs_tlwh,  # 4  2:6
+                                     bbs_scores,  # 1  6:7
+                                     bbs_classes,  # 1  7:8
+                                     second_padding_cols,  # 3  8:11
+                                     cls_logits,  # 1601  11:1612
+                                     ],
                                     axis=-1)
         roi_features_filepath = os.path.join(feats_dir, npy_filename)
         roi_features = np.load(roi_features_filepath)

@@ -7,6 +7,8 @@ import os
 import cv2
 import numpy as np
 from scipy.special import softmax
+import torch
+import torchvision
 
 from application_util import preprocessing
 from application_util import visualization
@@ -298,7 +300,24 @@ def gather_bua152_detections(detection_file, seq_name, debug_frames=None):
     return detections, 2048
 
 
-def run(sequence_dir, detection_file, output_dir, min_confidence,
+def torchvision_nms(boxes, scores, nms_max_overlap, classes=None):
+    x1 = boxes[:, 0:1]
+    y1 = boxes[:, 1:2]
+    x2 = boxes[:, 2:3] + boxes[:, 0:1]
+    y2 = boxes[:, 3:4] + boxes[:, 1:2]
+    boxes = torch.from_numpy(np.concatenate([x1, y1, x2, y2], axis=-1))
+    if classes is None:
+        indices = torchvision.ops.nms(boxes, torch.from_numpy(scores), nms_max_overlap)
+    else:
+        max_coordinate = boxes.max()
+        classes = torch.from_numpy(classes)
+        offsets = classes.to(boxes) * (max_coordinate + torch.tensor(1).to(boxes))
+        boxes_for_nms = boxes + offsets[:, None]
+        indices = torchvision.ops.nms(boxes_for_nms, torch.from_numpy(scores), nms_max_overlap)
+    return indices.tolist()
+
+
+def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display, debug_frames, save_tracklets_features):
     """Run multi-target tracker on a particular sequence.
@@ -334,7 +353,8 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         Whether to save extra information, such as visual features, other than the bounding box location and id.
     """
     detection_cfg = os.path.basename(detection_file)
-    tracking_cfg = str(min_confidence) + '-' + str(nms_max_overlap) + '-' + str(int(save_tracklets_features))
+    nms_log = {'standard': 's', 'torchvision': 't', 'torchvision-class': 'tc'}[nms_strategy]
+    tracking_cfg = str(min_confidence) + '-' + nms_log + '-' + str(nms_max_overlap) + '-' + str(int(save_tracklets_features))
     save_subdir = detection_cfg + '_' + tracking_cfg
     save_dir = os.path.join(output_dir, save_subdir)
     try:
@@ -372,8 +392,14 @@ def run(sequence_dir, detection_file, output_dir, min_confidence,
         # Run non-maxima suppression.
         boxes = np.array([d.tlwh for d in detections])
         scores = np.array([d.confidence for d in detections])
-        indices = preprocessing.non_max_suppression(
-            boxes, nms_max_overlap, scores)
+        if nms_strategy == 'original':
+            indices = preprocessing.non_max_suppression(
+                boxes, nms_max_overlap, scores)
+        elif nms_strategy == 'torchvision':
+            indices = torchvision_nms(boxes, scores, nms_max_overlap)
+        else:
+            classes = np.array([d.track_class for d in detections])
+            indices = torchvision_nms(boxes, scores, nms_max_overlap, classes)
         detections = [detections[i] for i in indices]
 
         # Update tracker.
@@ -452,6 +478,9 @@ def parse_args():
         "box height. Detections with height smaller than this value are "
         "disregarded", default=0, type=int)
     parser.add_argument(
+        '--nms_strategy', default='standard',
+        help='One of: standard, torchvision, or torchvision-class.')
+    parser.add_argument(
         "--nms_max_overlap",  help="Non-maxima suppression threshold: Maximum "
         "detection overlap.", default=1.0, type=float)
     parser.add_argument(
@@ -479,5 +508,5 @@ if __name__ == "__main__":
     args = parse_args()
     run(
         args.sequence_dir, args.detection_file, args.output_dir,
-        args.min_confidence, args.nms_max_overlap, args.min_detection_height,
+        args.min_confidence, args.nms_strategy, args.nms_max_overlap, args.min_detection_height,
         args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames, args.save_tracklets_features)

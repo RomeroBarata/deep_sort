@@ -16,8 +16,13 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="Siamese Tracking")
     parser.add_argument(
-        "--mot_dir", help="Path to MOTChallenge directory (train or test)",
+        "--mot_dir", help="Path to MOTChallenge directory (train or test). Root directory containing sub-directories "
+                          "for video frames.",
         required=True)
+    parser.add_argument(
+        '--vg_mutual_classes_filepath', type=str,
+        help='CSV file containing the mapping between VG classes and MPII/EK vocabulary.'
+    )
     parser.add_argument(
         "--top_k_tracks", help="Keep only the best k tracks. If None, keep all tracks.", type=int, default=None
     )
@@ -48,6 +53,8 @@ if __name__ == "__main__":
     output_dir = os.path.join(args.output_dir, os.path.basename(args.result_dir))
     if args.top_k_tracks is not None:
         output_dir += '-' + str(args.top_k_tracks) + '-' + args.top_k_tracks_criterion
+    if args.vg_mutual_classes_filepath is not None:
+        output_dir += '-' + 'sv'  # sv: shared vocabulary
 
     try:
         os.makedirs(output_dir)
@@ -68,7 +75,7 @@ if __name__ == "__main__":
         print("Saving %s to %s." % (sequence_txt, video_filename))
         show_results.run(
             sequence_dir, result_file, False, None, update_ms, video_filename, args.top_k_tracks,
-            args.top_k_tracks_criterion)
+            args.top_k_tracks_criterion, vg_mutual_classes_filepath=args.vg_mutual_classes_filepath)
 
     if not args.convert_h264:
         import sys

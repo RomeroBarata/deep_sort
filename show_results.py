@@ -3,6 +3,7 @@ import argparse
 
 import cv2
 import numpy as np
+import pandas as pd
 
 import deep_sort_app
 from deep_sort.iou_matching import iou
@@ -38,8 +39,17 @@ def create_id_to_name_dict(filepath):
     return d
 
 
+def amend_cls_to_name_mapping(vg_mutual_classes_filepath):
+    df = pd.read_csv(vg_mutual_classes_filepath)
+    df = df.fillna('UNK')
+    vg_id, shared_key = df['id'].tolist(), df['key'].tolist()
+    cls_id2cls_name = {cls_id: cls_key for cls_id, cls_key in zip(vg_id, shared_key)}
+    return cls_id2cls_name
+
+
 def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
-        update_ms=None, video_filename=None, top_k_tracks=None, top_k_tracks_criterion='length'):
+        update_ms=None, video_filename=None, top_k_tracks=None, top_k_tracks_criterion='length',
+        vg_mutual_classes_filepath=None):
     """Run tracking result visualization.
 
     Parameters
@@ -53,8 +63,8 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     detection_file : Optional[str]
         Path to the detection file.
     update_ms : Optional[int]
-        Number of milliseconds between cosecutive frames. Defaults to (a) the
-        frame rate specifid in the seqinfo.ini file or DEFAULT_UDPATE_MS ms if
+        Number of milliseconds between consecutive frames. Defaults to (a) the
+        frame rate specified in the seqinfo.ini file or DEFAULT_UPDATE_MS ms if
         seqinfo.ini is not available.
     video_filename : Optional[Str]
         If not None, a video of the tracking results is written to this file.
@@ -63,6 +73,8 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     top_k_tracks_criterion: str
         If top_k_tracks is not None, then use this criterion to select top k tracks. Options are: length and
         accumulated_score.
+    vg_mutual_classes_filepath: Optional[str]
+        If the .csv file is given, map the VG nouns to the associated MPII/EK nouns.
     """
     # seq_info = deep_sort_app.gather_sequence_info(sequence_dir, detection_file)
     if 'detr' in result_file:
@@ -71,6 +83,8 @@ def run(sequence_dir, result_file, show_false_alarms=False, detection_file=None,
     else:
         track_names_filepath = './resources/objects_vocab.txt'
         track_cls_to_track_name = create_id_to_name_dict(track_names_filepath)
+        if vg_mutual_classes_filepath is not None:
+            track_cls_to_track_name = amend_cls_to_name_mapping(vg_mutual_classes_filepath)
         feature_dim = 2048
     seq_info = deep_sort_app.gather_mpii_cooking_2_info(sequence_dir, detection_file, feature_dim=feature_dim)
     results = np.loadtxt(result_file, delimiter=',')

@@ -341,6 +341,8 @@ def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
     min_confidence : float
         Detection confidence threshold. Disregard all detections that have
         a confidence lower than this value.
+    nms_strategy: str
+        Which NMS library algorithm to apply. Options are: standard, torchvision, or torchvision-class.
     nms_max_overlap: float
         Maximum detection overlap (non-maxima suppression threshold).
     min_detection_height : int

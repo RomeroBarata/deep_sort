@@ -44,6 +44,7 @@ def amend_cls_to_name_mapping(vg_mutual_classes_filepath):
     df = df.fillna('UNK')
     vg_id, shared_key = df['id'].tolist(), df['key'].tolist()
     cls_id2cls_name = {cls_id: cls_key for cls_id, cls_key in zip(vg_id, shared_key)}
+    cls_id2cls_name[-1] = 'UNK'
     return cls_id2cls_name
 
 

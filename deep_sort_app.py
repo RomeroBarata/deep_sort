@@ -6,6 +6,7 @@ import os
 
 import cv2
 import numpy as np
+import pandas as pd
 from scipy.special import softmax
 import torch
 import torchvision
@@ -174,7 +175,14 @@ def create_detections(detection_mat, frame_idx, feature_dim, min_height=0):
     return detection_list
 
 
-def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None):
+def amend_bb_classes(bbs_classes, vg_mutual_ids):
+    for i, bb_cls in enumerate(bbs_classes[:, 0]):
+        if bb_cls not in vg_mutual_ids:
+            bbs_classes[i, 0] = -1
+    return bbs_classes
+
+
+def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None, vg_mutual_classes_filepath=None):
     cls_logits_dir = os.path.join(detection_dir, 'classes_logits', seq_name)
     pred_classes_dir = os.path.join(detection_dir, 'pred_classes', seq_name)
     scores_dir = os.path.join(detection_dir, 'scores', seq_name)
@@ -183,29 +191,23 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
     npy_filenames = sorted(os.listdir(bbs_dir))
     if debug_frames is not None:
         npy_filenames = npy_filenames[:debug_frames]
+    vg_mutual_ids = None
+    if vg_mutual_classes_filepath is not None:
+        vg_info = pd.read_csv(vg_mutual_classes_filepath)
+        vg_ids, vg_is_mutual = vg_info['id'].tolist(), vg_info['is_mutual'].tolist()
+        vg_mutual_ids = {vg_id for vg_id, vg_mutual_flag in zip(vg_ids, vg_is_mutual) if vg_mutual_flag}
     detections = []
     for i, npy_filename in enumerate(npy_filenames, start=1):
-        bbs_filepath = os.path.join(bbs_dir, npy_filename)
-        cls_logits_filepath = os.path.join(cls_logits_dir, npy_filename)
         pred_classes_filepath = os.path.join(pred_classes_dir, npy_filename)
+        bbs_classes = np.expand_dims(np.load(pred_classes_filepath), axis=-1)
+        if vg_mutual_ids is not None:
+            bbs_classes = amend_bb_classes(bbs_classes, vg_mutual_ids)
+        cls_logits_filepath = os.path.join(cls_logits_dir, npy_filename)
+        cls_logits = np.load(cls_logits_filepath)
         scores_filepath = os.path.join(scores_dir, npy_filename)
-        bbs = np.load(bbs_filepath)
-        try:
-            bbs_tlbr = bbs['bbox']
-        except IndexError:
-            bbs_tlbr = bbs[:, :4]
-        try:
-            bbs_scores = bbs['scores']  # (num_bboxes, num_classes + 1)
-            bbs_classes = np.argmax(bbs_scores[:, 1:], axis=-1) + 1
-            bbs_classes = np.reshape(bbs_classes, (-1, 1))
-            bbs_scores = np.max(bbs_scores[:, 1:], axis=-1, keepdims=True)
-        except KeyError:
-            bbs_scores = np.full_like(bbs_tlbr[:, :1], fill_value=1)
-            bbs_classes = np.full_like(bbs_scores, fill_value=-1)
-        except IndexError:  # TODO: This is always the correct path, right?
-            bbs_scores = np.expand_dims(np.load(scores_filepath), axis=-1)
-            bbs_classes = np.expand_dims(np.load(pred_classes_filepath), axis=-1)
-            cls_logits = np.load(cls_logits_filepath)
+        bbs_scores = np.expand_dims(np.load(scores_filepath), axis=-1)
+        bbs_filepath = os.path.join(bbs_dir, npy_filename)
+        bbs_tlbr = np.load(bbs_filepath)
         bbs_width, bbs_height = np.abs(bbs_tlbr[:, 2:3] - bbs_tlbr[:, 0:1]), np.abs(bbs_tlbr[:, 3:4] - bbs_tlbr[:, 1:2])
         bbs_tlwh = np.concatenate([bbs_tlbr[:, :2], bbs_width, bbs_height], axis=-1)
         frame_indices = np.full_like(bbs_scores, fill_value=i)
@@ -222,10 +224,6 @@ def gather_mpii_cooking_2_detections(detection_dir, seq_name, debug_frames=None)
                                     axis=-1)
         roi_features_filepath = os.path.join(feats_dir, npy_filename)
         roi_features = np.load(roi_features_filepath)
-        try:
-            roi_features = roi_features['x']
-        except IndexError:
-            pass
         frame_detections = np.concatenate([mot16_cols, roi_features], axis=-1)
         detections.append(frame_detections)
     detections = np.concatenate(detections, axis=0)
@@ -325,7 +323,7 @@ def torchvision_nms(boxes, scores, nms_max_overlap, classes=None):
 
 def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
         nms_max_overlap, min_detection_height, max_cosine_distance,
-        nn_budget, display, debug_frames, save_tracklets_features):
+        nn_budget, display, debug_frames, save_tracklets_features, vg_mutual_classes_filepath=None):
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -359,10 +357,17 @@ def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
         If not None, only tracks the first specified number of frames.
     save_tracklets_features: bool
         Whether to save extra information, such as visual features, other than the bounding box location and id.
+    vg_mutual_classes_filepath: Optional[str]
+        If specified and the detections come from a model trained on Visual Genome, map unknown classes to a single
+        unknown class.
     """
     detection_cfg = os.path.basename(detection_file)
     nms_log = {'standard': 's', 'torchvision': 't', 'torchvision-class': 'tc'}[nms_strategy]
-    tracking_cfg = str(min_confidence) + '-' + nms_log + '-' + str(nms_max_overlap) + '-' + str(int(save_tracklets_features))
+    tracking_cfg = (str(min_confidence) +
+                    '-' + nms_log +
+                    '-' + str(nms_max_overlap) +
+                    '-' + str(int(save_tracklets_features))
+                    )
     save_subdir = detection_cfg + '_' + tracking_cfg
     save_dir = os.path.join(output_dir, save_subdir)
     try:
@@ -376,16 +381,19 @@ def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
         print('Tracking for video %s already done. Skipping it.' % seq_name)
         return
     # detection_file is actually a dir below
-    if 'detr' in detection_file:
+    if 'detr' in detection_file:  # detections from detr
         collated_detections, feature_dim = gather_detr_detections(detection_file, seq_name, debug_frames=debug_frames)
-    elif 'bua' in detection_file:
+    elif 'pbua' in detection_file:  # detections from py-bottom-up-attention
+        collated_detections, feature_dim = \
+            gather_mpii_cooking_2_detections(detection_file, seq_name,
+                                             debug_frames=debug_frames,
+                                             vg_mutual_classes_filepath=vg_mutual_classes_filepath)
+    elif 'bua' in detection_file:  # detections from bottom-up-attention.pytorch
         collated_detections, feature_dim = gather_bua152_detections(detection_file, seq_name, debug_frames=debug_frames)
     else:
-        collated_detections, feature_dim = gather_mpii_cooking_2_detections(detection_file, seq_name,
-                                                                            debug_frames=debug_frames)
+        raise ValueError('Unknown detections to track.')
     seq_info = gather_mpii_cooking_2_info(sequence_dir, collated_detections, feature_dim, debug_frames=debug_frames)
-    metric = nn_matching.NearestNeighborDistanceMetric(
-        "cosine", max_cosine_distance, nn_budget)
+    metric = nn_matching.NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
     results = []
 
@@ -400,7 +408,7 @@ def run(sequence_dir, detection_file, output_dir, min_confidence, nms_strategy,
         # Run non-maxima suppression.
         boxes = np.array([d.tlwh for d in detections])
         scores = np.array([d.confidence for d in detections])
-        if nms_strategy == 'original':
+        if nms_strategy == 'standard':
             indices = preprocessing.non_max_suppression(
                 boxes, nms_max_overlap, scores)
         elif nms_strategy == 'torchvision':
@@ -478,6 +486,10 @@ def parse_args():
                              "containing the tracking results on completion.",
         default="/tmp")
     parser.add_argument(
+        '--vg_mutual_classes_filepath', type=str,
+        help='CSV file containing the mapping between VG classes and MPII/EK vocabulary.'
+    )
+    parser.add_argument(
         "--min_confidence", help="Detection confidence threshold. Disregard "
         "all detections that have a confidence lower than this value.",
         default=0.8, type=float)
@@ -515,6 +527,16 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     run(
-        args.sequence_dir, args.detection_file, args.output_dir,
-        args.min_confidence, args.nms_strategy, args.nms_max_overlap, args.min_detection_height,
-        args.max_cosine_distance, args.nn_budget, args.display, args.debug_frames, args.save_tracklets_features)
+        sequence_dir=args.sequence_dir,
+        detection_file=args.detection_file,
+        output_dir=args.output_dir,
+        min_confidence=args.min_confidence,
+        nms_strategy=args.nms_strategy,
+        nms_max_overlap=args.nms_max_overlap,
+        min_detection_height=args.min_detection_height,
+        max_cosine_distance=args.max_cosine_distance,
+        nn_budget=args.nn_budget,
+        display=args.display,
+        debug_frames=args.debug_frames,
+        save_tracklets_features=args.save_tracklets_features,
+        vg_mutual_classes_filepath=args.vg_mutual_classes_filepath)

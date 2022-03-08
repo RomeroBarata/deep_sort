@@ -499,6 +499,7 @@ def parse_args():
         "disregarded", default=0, type=int)
     parser.add_argument(
         '--nms_strategy', default='standard',
+        choices=('standard', 'torchvision', 'torchvision-class'),
         help='One of: standard, torchvision, or torchvision-class.')
     parser.add_argument(
         "--nms_max_overlap",  help="Non-maxima suppression threshold: Maximum "
